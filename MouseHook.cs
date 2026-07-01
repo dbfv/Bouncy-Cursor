@@ -7,11 +7,13 @@ namespace BounceCursor
     {
         private const int WH_MOUSE_LL = 14;
         private const int WM_LBUTTONDOWN = 0x0201;
+        private const int WM_LBUTTONUP = 0x0202;
 
         private readonly LowLevelMouseProc _proc;
         private IntPtr _hookId = IntPtr.Zero;
 
-        public event Action<int, int>? LeftClick;
+        public event Action<int, int>? LeftButtonDown;
+        public event Action<int, int>? LeftButtonUp;
 
         public MouseHook() => _proc = HookCallback;
 
@@ -26,10 +28,13 @@ namespace BounceCursor
 
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && wParam == (IntPtr)WM_LBUTTONDOWN)
+            if (nCode >= 0)
             {
                 var hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                LeftClick?.Invoke(hookStruct.pt.x, hookStruct.pt.y);
+                if (wParam == (IntPtr)WM_LBUTTONDOWN)
+                    LeftButtonDown?.Invoke(hookStruct.pt.x, hookStruct.pt.y);
+                else if (wParam == (IntPtr)WM_LBUTTONUP)
+                    LeftButtonUp?.Invoke(hookStruct.pt.x, hookStruct.pt.y);
             }
             return CallNextHookEx(_hookId, nCode, wParam, lParam);
         }
