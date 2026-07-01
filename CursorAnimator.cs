@@ -18,6 +18,10 @@ namespace BounceCursor
         private static readonly IntPtr _arrowHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_ARROW);
         private static readonly IntPtr _handHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_HAND);
 
+        // Keep pristine copies of the original cursors to prevent infinite scaling
+        private static readonly IntPtr _origArrowHandle = CopyIcon(_arrowHandle);
+        private static readonly IntPtr _origHandHandle = CopyIcon(_handHandle);
+
         public static CursorKind GetActiveCursorKind()
         {
             var ci = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
@@ -31,15 +35,16 @@ namespace BounceCursor
         {
             if (kind == CursorKind.None) return;
             uint ocrId = kind == CursorKind.Arrow ? OCR_NORMAL : OCR_HAND;
-            IntPtr baseCursor = kind == CursorKind.Arrow ? _arrowHandle : _handHandle;
+            
+            // Use the pristine copy as the base, not the system cursor which gets overwritten
+            IntPtr baseCursor = kind == CursorKind.Arrow ? _origArrowHandle : _origHandHandle;
 
             IntPtr scaled = BuildScaledCursor(baseCursor, scale);
             if (scaled != IntPtr.Zero)
-                SetSystemCursor(scaled, ocrId); // OS tự huỷ handle này sau khi gán
+                SetSystemCursor(scaled, ocrId); // OS automatically destroys this handle after setting
         }
 
-        // Reset TOÀN BỘ cursor hệ thống về mặc định — gọi khi kết thúc animation
-        // hoặc bất cứ khi nào app thoát/crash.
+        // Reset ALL system cursors to default — call when animation ends or when app exits/crashes.
         public static void RestoreAll() =>
             SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
 
@@ -92,7 +97,7 @@ namespace BounceCursor
             return result;
         }
 
-// Đọc HBITMAP thành Bitmap giữ nguyên alpha thật (thay cho Image.FromHbitmap bị lỗi mất alpha)
+        // Read HBITMAP to Bitmap preserving real alpha (replaces Image.FromHbitmap which loses alpha)
         private static Bitmap? ExtractColorBitmap(IntPtr hbm)
         {
             var bmpInfo = new BITMAP();
@@ -130,8 +135,8 @@ namespace BounceCursor
             bmp.UnlockBits(data);
             return bmp;
         }
-        // Tạo HBITMAP 32bpp giữ đúng kênh alpha (premultiplied) để cursor
-        // trong suốt hiển thị đúng, không bị viền đen.
+        
+        // Create 32bpp HBITMAP keeping correct alpha channel (premultiplied) so transparent cursor displays correctly without black borders.
         private static IntPtr CreatePremultipliedHBitmap(Bitmap bmp)
         {
             int w = bmp.Width, h = bmp.Height;
@@ -166,12 +171,11 @@ namespace BounceCursor
             return hBitmap;
         }
 
-        // Mask toàn 0, đúng kích thước color bitmap đã scale — bắt buộc phải khớp size,
-        // nếu không CreateIconIndirect sẽ render ra hình vỡ/méo.
+        // All 0 mask, exact size of scaled color bitmap — must match size, otherwise CreateIconIndirect renders broken/distorted shape.
         private static IntPtr CreateMatchingMask(int width, int height)
         {
-            int stride = ((width + 15) / 16) * 2; // mono bitmap yêu cầu align 16-bit
-            byte[] zeroBits = new byte[stride * height]; // mặc định toàn 0
+            int stride = ((width + 15) / 16) * 2; // mono bitmap requires 16-bit alignment
+            byte[] zeroBits = new byte[stride * height]; // default all 0
             GCHandle handle = GCHandle.Alloc(zeroBits, GCHandleType.Pinned);
             try
             {
@@ -208,6 +212,7 @@ namespace BounceCursor
         [DllImport("user32.dll")] private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
         [DllImport("gdi32.dll")] private static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFO pbmi, uint usage, out IntPtr ppvBits, IntPtr hSection, uint offset);
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
+        [DllImport("user32.dll")] private static extern IntPtr CopyIcon(IntPtr hIcon);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct BITMAP
