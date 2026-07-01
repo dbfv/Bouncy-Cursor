@@ -51,7 +51,8 @@ namespace BounceCursor
             try
             {
                 IntPtr srcColor = info.hbmColor != IntPtr.Zero ? info.hbmColor : info.hbmMask;
-                using var colorBmp = Image.FromHbitmap(srcColor);
+                using var colorBmp = ExtractColorBitmap(srcColor);
+                if (colorBmp == null) return IntPtr.Zero;
                 int w = colorBmp.Width, h = colorBmp.Height;
 
                 using var canvas = new Bitmap(w, h, PixelFormat.Format32bppArgb);
@@ -89,6 +90,44 @@ namespace BounceCursor
             return result;
         }
 
+// Đọc HBITMAP thành Bitmap giữ nguyên alpha thật (thay cho Image.FromHbitmap bị lỗi mất alpha)
+        private static Bitmap? ExtractColorBitmap(IntPtr hbm)
+        {
+            var bmpInfo = new BITMAP();
+            if (GetObject(hbm, Marshal.SizeOf<BITMAP>(), ref bmpInfo) == 0) return null;
+            int width = bmpInfo.bmWidth;
+            int height = bmpInfo.bmHeight;
+            if (width <= 0 || height <= 0) return null;
+
+            var bmi = new BITMAPINFO();
+            bmi.bmiHeader.biSize = Marshal.SizeOf<BITMAPINFOHEADER>();
+            bmi.bmiHeader.biWidth = width;
+            bmi.bmiHeader.biHeight = -height; // top-down
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = 0;
+
+            int stride = width * 4;
+            byte[] buffer = new byte[stride * height];
+            IntPtr hdc = GetDC(IntPtr.Zero);
+            GCHandle handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+            try
+            {
+                int scanLines = GetDIBits(hdc, hbm, 0, (uint)height, handle.AddrOfPinnedObject(), ref bmi, 0);
+                if (scanLines == 0) return null;
+            }
+            finally
+            {
+                handle.Free();
+                ReleaseDC(IntPtr.Zero, hdc);
+            }
+
+            var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            var data = bmp.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            Marshal.Copy(buffer, 0, data.Scan0, buffer.Length);
+            bmp.UnlockBits(data);
+            return bmp;
+        }
         // Tạo HBITMAP 32bpp giữ đúng kênh alpha (premultiplied) để cursor
         // trong suốt hiển thị đúng, không bị viền đen.
         private static IntPtr CreatePremultipliedHBitmap(Bitmap bmp)
@@ -150,5 +189,18 @@ namespace BounceCursor
         [DllImport("user32.dll")] private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
         [DllImport("gdi32.dll")] private static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFO pbmi, uint usage, out IntPtr ppvBits, IntPtr hSection, uint offset);
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BITMAP
+        {
+            public int bmType, bmWidth, bmHeight, bmWidthBytes;
+            public short bmPlanes, bmBitsPixel;
+            public IntPtr bmBits;
+        }
+
+        [DllImport("gdi32.dll")] private static extern int GetObject(IntPtr hObject, int nCount, ref BITMAP lpObject);
+        [DllImport("gdi32.dll")] private static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint cLines, IntPtr lpvBits, ref BITMAPINFO lpbmi, uint usage);
+        [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
     }
 }

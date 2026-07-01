@@ -20,7 +20,9 @@ jobs:
         run: dotnet publish BounceCursor.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish
 
       - name: Zip publish folder
-        run: Compress-Archive -Path publish\* -DestinationPath BounceCursor.zip
+        run: |
+          cd publish
+          Compress-Archive -Path * -DestinationPath ../BounceCursor.zip
         shell: pwsh
 
       - name: Upload artifact
