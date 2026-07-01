@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 
 using Brushes = System.Windows.Media.Brushes;
 using Point = System.Windows.Point;
+using Image = System.Windows.Controls.Image;
 
 namespace BounceCursor
 {
