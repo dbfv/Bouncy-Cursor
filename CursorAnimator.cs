@@ -53,6 +53,7 @@ namespace BounceCursor
                 IntPtr srcColor = info.hbmColor != IntPtr.Zero ? info.hbmColor : info.hbmMask;
                 using var colorBmp = ExtractColorBitmap(srcColor);
                 if (colorBmp == null) return IntPtr.Zero;
+
                 int w = colorBmp.Width, h = colorBmp.Height;
 
                 using var canvas = new Bitmap(w, h, PixelFormat.Format32bppArgb);
@@ -63,7 +64,6 @@ namespace BounceCursor
 
                     float newW = (float)(w * scale);
                     float newH = (float)(h * scale);
-                    // Co giãn quanh đúng hotspot để không bị "trôi" khi animate
                     float offsetX = info.xHotspot - info.xHotspot * (float)scale;
                     float offsetY = info.yHotspot - info.yHotspot * (float)scale;
                     g.DrawImage(colorBmp, offsetX, offsetY, newW, newH);
@@ -83,17 +83,6 @@ namespace BounceCursor
                 result = CreateIconIndirect(ref newInfo);
                 DeleteObject(hColorArgb);
                 DeleteObject(hMaskNew);
-
-                var newInfo = new ICONINFO
-                {
-                    fIcon = false, // false = cursor (không phải icon)
-                    xHotspot = info.xHotspot,
-                    yHotspot = info.yHotspot,
-                    hbmColor = hColorArgb,
-                    hbmMask = info.hbmMask
-                };
-                result = CreateIconIndirect(ref newInfo);
-                DeleteObject(hColorArgb);
             }
             finally
             {
