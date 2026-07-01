@@ -60,22 +60,27 @@ namespace BounceCursor
                 if (colorBmp == null) return IntPtr.Zero;
 
                 int w = colorBmp.Width, h = colorBmp.Height;
+                int destW = (int)Math.Round(w * scale);
+                int destH = (int)Math.Round(h * scale);
+                int offsetX = (int)Math.Round(info.xHotspot * (1.0 - scale));
+                int offsetY = (int)Math.Round(info.yHotspot * (1.0 - scale));
 
                 using var canvas = new Bitmap(w, h, PixelFormat.Format32bppArgb);
                 using (var g = Graphics.FromImage(canvas))
                 {
                     g.Clear(Color.Transparent);
-                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    
+                    // Bilinear ít gây ra viền đen (ringing artifact) hơn so với Bicubic trên ảnh siêu nhỏ
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
                     g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
-                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
-                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half; // Căn pixel chuẩn xác 100%
 
-                    float newW = (float)(w * scale);
-                    float newH = (float)(h * scale);
-                    float offsetX = info.xHotspot - info.xHotspot * (float)scale;
-                    float offsetY = info.yHotspot - info.yHotspot * (float)scale;
-                    g.DrawImage(colorBmp, offsetX, offsetY, newW, newH);
+                    // "Bảo bối" ImageAttributes chặn GDI+ lấy màu đen từ ngoài viền ảnh hòa trộn vào trong
+                    using var attributes = new System.Drawing.Imaging.ImageAttributes();
+                    attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+
+                    var destRect = new Rectangle(offsetX, offsetY, destW, destH);
+                    g.DrawImage(colorBmp, destRect, 0, 0, w, h, GraphicsUnit.Pixel, attributes);
                 }
 
                 IntPtr hColorArgb = CreatePremultipliedHBitmap(canvas);
