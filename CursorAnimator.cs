@@ -5,24 +5,26 @@ using System.Runtime.InteropServices;
 
 namespace BounceCursor
 {
-    // Thêm IBeam vào danh sách họ hàng nhà Cursor
     public enum CursorKind { None, Arrow, Hand, IBeam }
 
     public static class CursorAnimator
     {
         private const uint OCR_NORMAL = 32512;
         private const uint OCR_HAND = 32649;
-        private const uint OCR_IBEAM = 32513; // Mã I-Beam của hệ thống
+        private const uint OCR_IBEAM = 32513;
 
         private const uint IDC_ARROW = 32512;
         private const uint IDC_HAND = 32649;
-        private const uint IDC_IBEAM = 32513; // Mã I-Beam của hệ thống
+        private const uint IDC_IBEAM = 32513;
+
+        // The missing constant has returned!
+        private const uint SPI_SETCURSORS = 0x0057;
 
         private static readonly IntPtr _arrowHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_ARROW);
         private static readonly IntPtr _handHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_HAND);
         private static readonly IntPtr _ibeamHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_IBEAM);
 
-        // Lưu lại bản gốc "zin 100%" để không bị lỗi thu nhỏ vô hạn
+        // Keep pristine copies of the original cursors to prevent infinite scaling
         private static readonly IntPtr _origArrowHandle = CopyIcon(_arrowHandle);
         private static readonly IntPtr _origHandHandle = CopyIcon(_handHandle);
         private static readonly IntPtr _origIBeamHandle = CopyIcon(_ibeamHandle);
@@ -33,7 +35,7 @@ namespace BounceCursor
             if (!GetCursorInfo(out ci) || ci.hCursor == IntPtr.Zero) return CursorKind.None;
             if (ci.hCursor == _arrowHandle) return CursorKind.Arrow;
             if (ci.hCursor == _handHandle) return CursorKind.Hand;
-            if (ci.hCursor == _ibeamHandle) return CursorKind.IBeam; // Nhận diện I-Beam
+            if (ci.hCursor == _ibeamHandle) return CursorKind.IBeam;
             return CursorKind.None;
         }
 
@@ -46,7 +48,7 @@ namespace BounceCursor
 
             if (kind == CursorKind.Arrow) { ocrId = OCR_NORMAL; baseCursor = _origArrowHandle; }
             else if (kind == CursorKind.Hand) { ocrId = OCR_HAND; baseCursor = _origHandHandle; }
-            else if (kind == CursorKind.IBeam) { ocrId = OCR_IBEAM; baseCursor = _origIBeamHandle; } // Gán base cho I-Beam
+            else if (kind == CursorKind.IBeam) { ocrId = OCR_IBEAM; baseCursor = _origIBeamHandle; }
 
             IntPtr scaled = BuildScaledCursor(baseCursor, scale);
             if (scaled != IntPtr.Zero)
@@ -67,30 +69,27 @@ namespace BounceCursor
                 using var colorBmp = ExtractColorBitmap(srcColor);
                 if (colorBmp == null) return IntPtr.Zero;
 
-                int w = colorBmp.Width, h = colorBmp.Height;
-
-                // CÔNG THỨC ÉP SỐ NGUYÊN - Giải quyết triệt để bệnh "mờ sương mù"
-                int destW = (int)Math.Round(w * scale);
-                int destH = (int)Math.Round(h * scale);
+                // Calculate destination size and offsets using Math.Round to prevent sub-pixel rendering blur
+                int destW = (int)Math.Round(colorBmp.Width * scale);
+                int destH = (int)Math.Round(colorBmp.Height * scale);
                 int offsetX = (int)Math.Round(info.xHotspot * (1.0 - scale));
                 int offsetY = (int)Math.Round(info.yHotspot * (1.0 - scale));
 
-                using var canvas = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                using var canvas = new Bitmap(colorBmp.Width, colorBmp.Height, PixelFormat.Format32bppArgb);
                 using (var g = Graphics.FromImage(canvas))
                 {
                     g.Clear(Color.Transparent);
                     
-                    // Combo "nét căng như Sony" dành riêng cho ảnh nhỏ
                     g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
                     g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
                     g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half; 
 
-                    // "Bùa chú" khóa viền đen
+                    // Use ImageAttributes to prevent edge bleeding (ringing artifacts)
                     using var attributes = new System.Drawing.Imaging.ImageAttributes();
                     attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
 
                     var destRect = new Rectangle(offsetX, offsetY, destW, destH);
-                    g.DrawImage(colorBmp, destRect, 0, 0, w, h, GraphicsUnit.Pixel, attributes);
+                    g.DrawImage(colorBmp, destRect, 0, 0, colorBmp.Width, colorBmp.Height, GraphicsUnit.Pixel, attributes);
                 }
 
                 IntPtr hColorArgb = CreatePremultipliedHBitmap(canvas);
