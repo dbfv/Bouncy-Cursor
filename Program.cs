@@ -13,15 +13,17 @@ namespace BounceCursor
         [STAThread]
         public static void Main()
         {
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => CursorAnimator.RestoreAll();
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-                LogCrash(e.ExceptionObject as Exception, "AppDomain.UnhandledException");
-
-            try
             {
-                RunApp();
-            }
+                CursorAnimator.RestoreAll();
+                LogCrash(e.ExceptionObject as Exception, "AppDomain.UnhandledException");
+            };
+
+            try { RunApp(); }
             catch (Exception ex)
             {
+                CursorAnimator.RestoreAll();
                 LogCrash(ex, "Main try/catch");
                 throw;
             }
@@ -32,16 +34,15 @@ namespace BounceCursor
             var app = new Application { ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown };
             app.DispatcherUnhandledException += (_, e) =>
             {
+                CursorAnimator.RestoreAll();
                 LogCrash(e.Exception, "DispatcherUnhandledException");
-                e.Handled = true; // giữ app sống tiếp thay vì crash
+                e.Handled = true;
             };
 
-            var overlay = new OverlayWindow();
-            overlay.Show();
-
+            var bounce = new CursorBounceEffect();
             var hook = new MouseHook();
-            hook.LeftButtonDown += (x, y) => overlay.Dispatcher.Invoke(() => overlay.OnPress(x, y));
-            hook.LeftButtonUp += (x, y) => overlay.Dispatcher.Invoke(() => overlay.OnRelease());
+            hook.LeftButtonDown += (x, y) => app.Dispatcher.Invoke(() => bounce.OnPress());
+            hook.LeftButtonUp += (x, y) => app.Dispatcher.Invoke(() => bounce.OnRelease());
             hook.Start();
 
             var trayIcon = new NotifyIcon
@@ -53,24 +54,21 @@ namespace BounceCursor
             var menu = new ContextMenuStrip();
             menu.Items.Add("Thoát", null, (_, _) =>
             {
+                CursorAnimator.RestoreAll();
                 hook.Dispose();
                 trayIcon.Visible = false;
                 app.Shutdown();
             });
             trayIcon.ContextMenuStrip = menu;
 
-            app.Exit += (_, _) => hook.Dispose();
+            app.Exit += (_, _) => { hook.Dispose(); CursorAnimator.RestoreAll(); };
             app.Run();
         }
 
         private static void LogCrash(Exception? ex, string source)
         {
-            try
-            {
-                File.AppendAllText(LogPath,
-                    $"[{DateTime.Now}] {source}\n{ex}\n\n");
-            }
-            catch { /* nothing we can do */ }
+            try { File.AppendAllText(LogPath, $"[{DateTime.Now}] {source}\n{ex}\n\n"); }
+            catch { }
         }
     }
 }
