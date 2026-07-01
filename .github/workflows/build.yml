@@ -1,36 +1,26 @@
-name: Build Backend and Frontend
+name: Build BounceCursor
 
 on:
-  pull_request:
-    branches:
-      - main
-      
-permissions:
-  contents: read
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build All Projects
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        project:
-          - SampleApp/BackEnd/BackEnd.csproj
-          - SampleApp/FrontEnd/FrontEnd.csproj
-
+    runs-on: windows-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '8.0.x'
 
-      - name: Restore dependencies
-        run: dotnet restore ${{ matrix.project }}
+      - name: Publish
+        run: dotnet publish BounceCursor.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
 
-      - name: Build project
-        run: dotnet build ${{ matrix.project }} --no-restore --configuration Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BounceCursor-exe
+          path: publish/BounceCursor.exe
