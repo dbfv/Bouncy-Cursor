@@ -70,6 +70,19 @@ namespace BounceCursor
                 }
 
                 IntPtr hColorArgb = CreatePremultipliedHBitmap(canvas);
+                IntPtr hMaskNew = CreateMatchingMask(canvas.Width, canvas.Height);
+
+                var newInfo = new ICONINFO
+                {
+                    fIcon = false,
+                    xHotspot = info.xHotspot,
+                    yHotspot = info.yHotspot,
+                    hbmColor = hColorArgb,
+                    hbmMask = hMaskNew
+                };
+                result = CreateIconIndirect(ref newInfo);
+                DeleteObject(hColorArgb);
+                DeleteObject(hMaskNew);
 
                 var newInfo = new ICONINFO
                 {
@@ -164,6 +177,23 @@ namespace BounceCursor
             return hBitmap;
         }
 
+        // Mask toàn 0, đúng kích thước color bitmap đã scale — bắt buộc phải khớp size,
+        // nếu không CreateIconIndirect sẽ render ra hình vỡ/méo.
+        private static IntPtr CreateMatchingMask(int width, int height)
+        {
+            int stride = ((width + 15) / 16) * 2; // mono bitmap yêu cầu align 16-bit
+            byte[] zeroBits = new byte[stride * height]; // mặc định toàn 0
+            GCHandle handle = GCHandle.Alloc(zeroBits, GCHandleType.Pinned);
+            try
+            {
+                return CreateBitmap(width, height, 1, 1, handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         private struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
         [StructLayout(LayoutKind.Sequential)]
@@ -202,5 +232,6 @@ namespace BounceCursor
         [DllImport("gdi32.dll")] private static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint cLines, IntPtr lpvBits, ref BITMAPINFO lpbmi, uint usage);
         [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateBitmap(int nWidth, int nHeight, uint nPlanes, uint nBitCount, IntPtr lpvBits);
     }
 }
