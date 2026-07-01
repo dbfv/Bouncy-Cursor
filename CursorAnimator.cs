@@ -5,22 +5,27 @@ using System.Runtime.InteropServices;
 
 namespace BounceCursor
 {
-    public enum CursorKind { None, Arrow, Hand }
+    // Thêm IBeam vào danh sách họ hàng nhà Cursor
+    public enum CursorKind { None, Arrow, Hand, IBeam }
 
     public static class CursorAnimator
     {
         private const uint OCR_NORMAL = 32512;
         private const uint OCR_HAND = 32649;
+        private const uint OCR_IBEAM = 32513; // Mã I-Beam của hệ thống
+
         private const uint IDC_ARROW = 32512;
         private const uint IDC_HAND = 32649;
-        private const uint SPI_SETCURSORS = 0x0057;
+        private const uint IDC_IBEAM = 32513; // Mã I-Beam của hệ thống
 
         private static readonly IntPtr _arrowHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_ARROW);
         private static readonly IntPtr _handHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_HAND);
+        private static readonly IntPtr _ibeamHandle = LoadCursor(IntPtr.Zero, (IntPtr)IDC_IBEAM);
 
-        // Keep pristine copies of the original cursors to prevent infinite scaling
+        // Lưu lại bản gốc "zin 100%" để không bị lỗi thu nhỏ vô hạn
         private static readonly IntPtr _origArrowHandle = CopyIcon(_arrowHandle);
         private static readonly IntPtr _origHandHandle = CopyIcon(_handHandle);
+        private static readonly IntPtr _origIBeamHandle = CopyIcon(_ibeamHandle);
 
         public static CursorKind GetActiveCursorKind()
         {
@@ -28,23 +33,26 @@ namespace BounceCursor
             if (!GetCursorInfo(out ci) || ci.hCursor == IntPtr.Zero) return CursorKind.None;
             if (ci.hCursor == _arrowHandle) return CursorKind.Arrow;
             if (ci.hCursor == _handHandle) return CursorKind.Hand;
+            if (ci.hCursor == _ibeamHandle) return CursorKind.IBeam; // Nhận diện I-Beam
             return CursorKind.None;
         }
 
         public static void ApplyScale(CursorKind kind, double scale)
         {
             if (kind == CursorKind.None) return;
-            uint ocrId = kind == CursorKind.Arrow ? OCR_NORMAL : OCR_HAND;
             
-            // Use the pristine copy as the base, not the system cursor which gets overwritten
-            IntPtr baseCursor = kind == CursorKind.Arrow ? _origArrowHandle : _origHandHandle;
+            uint ocrId = OCR_NORMAL;
+            IntPtr baseCursor = _origArrowHandle;
+
+            if (kind == CursorKind.Arrow) { ocrId = OCR_NORMAL; baseCursor = _origArrowHandle; }
+            else if (kind == CursorKind.Hand) { ocrId = OCR_HAND; baseCursor = _origHandHandle; }
+            else if (kind == CursorKind.IBeam) { ocrId = OCR_IBEAM; baseCursor = _origIBeamHandle; } // Gán base cho I-Beam
 
             IntPtr scaled = BuildScaledCursor(baseCursor, scale);
             if (scaled != IntPtr.Zero)
-                SetSystemCursor(scaled, ocrId); // OS automatically destroys this handle after setting
+                SetSystemCursor(scaled, ocrId); 
         }
 
-        // Reset ALL system cursors to default — call when animation ends or when app exits/crashes.
         public static void RestoreAll() =>
             SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
 
@@ -60,6 +68,8 @@ namespace BounceCursor
                 if (colorBmp == null) return IntPtr.Zero;
 
                 int w = colorBmp.Width, h = colorBmp.Height;
+
+                // CÔNG THỨC ÉP SỐ NGUYÊN - Giải quyết triệt để bệnh "mờ sương mù"
                 int destW = (int)Math.Round(w * scale);
                 int destH = (int)Math.Round(h * scale);
                 int offsetX = (int)Math.Round(info.xHotspot * (1.0 - scale));
@@ -70,12 +80,12 @@ namespace BounceCursor
                 {
                     g.Clear(Color.Transparent);
                     
-                    // Bilinear ít gây ra viền đen (ringing artifact) hơn so với Bicubic trên ảnh siêu nhỏ
+                    // Combo "nét căng như Sony" dành riêng cho ảnh nhỏ
                     g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
                     g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
-                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half; // Căn pixel chuẩn xác 100%
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half; 
 
-                    // "Bảo bối" ImageAttributes chặn GDI+ lấy màu đen từ ngoài viền ảnh hòa trộn vào trong
+                    // "Bùa chú" khóa viền đen
                     using var attributes = new System.Drawing.Imaging.ImageAttributes();
                     attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
 
@@ -106,7 +116,6 @@ namespace BounceCursor
             return result;
         }
 
-        // Read HBITMAP to Bitmap preserving real alpha (replaces Image.FromHbitmap which loses alpha)
         private static Bitmap? ExtractColorBitmap(IntPtr hbm)
         {
             var bmpInfo = new BITMAP();
@@ -118,7 +127,7 @@ namespace BounceCursor
             var bmi = new BITMAPINFO();
             bmi.bmiHeader.biSize = Marshal.SizeOf<BITMAPINFOHEADER>();
             bmi.bmiHeader.biWidth = width;
-            bmi.bmiHeader.biHeight = -height; // top-down
+            bmi.bmiHeader.biHeight = -height; 
             bmi.bmiHeader.biPlanes = 1;
             bmi.bmiHeader.biBitCount = 32;
             bmi.bmiHeader.biCompression = 0;
@@ -145,17 +154,16 @@ namespace BounceCursor
             return bmp;
         }
         
-        // Create 32bpp HBITMAP keeping correct alpha channel (premultiplied) so transparent cursor displays correctly without black borders.
         private static IntPtr CreatePremultipliedHBitmap(Bitmap bmp)
         {
             int w = bmp.Width, h = bmp.Height;
             var bmi = new BITMAPINFO();
             bmi.bmiHeader.biSize = Marshal.SizeOf<BITMAPINFOHEADER>();
             bmi.bmiHeader.biWidth = w;
-            bmi.bmiHeader.biHeight = -h; // top-down
+            bmi.bmiHeader.biHeight = -h; 
             bmi.bmiHeader.biPlanes = 1;
             bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = 0; // BI_RGB
+            bmi.bmiHeader.biCompression = 0; 
 
             IntPtr hBitmap = CreateDIBSection(IntPtr.Zero, ref bmi, 0, out IntPtr ppvBits, IntPtr.Zero, 0);
             if (hBitmap == IntPtr.Zero || ppvBits == IntPtr.Zero) return IntPtr.Zero;
@@ -180,11 +188,10 @@ namespace BounceCursor
             return hBitmap;
         }
 
-        // All 0 mask, exact size of scaled color bitmap — must match size, otherwise CreateIconIndirect renders broken/distorted shape.
         private static IntPtr CreateMatchingMask(int width, int height)
         {
-            int stride = ((width + 15) / 16) * 2; // mono bitmap requires 16-bit alignment
-            byte[] zeroBits = new byte[stride * height]; // default all 0
+            int stride = ((width + 15) / 16) * 2; 
+            byte[] zeroBits = new byte[stride * height]; 
             GCHandle handle = GCHandle.Alloc(zeroBits, GCHandleType.Pinned);
             try
             {
