@@ -1,61 +1,58 @@
-# GitHub Codespaces ♥️ C#
+# ✨ Bouncy-Cursor ✨
 
-Want to try out C# for web development? 
+<p align="center">
+  <img src="https://img.shields.io/badge/❌-Windows ✅-blue?style=for-the-badge&logo=apple" alt="Windows Support" />
+  <img src="https://img.shields.io/badge/Status-For_Fun-F9ED32?style=for-the-badge" alt="For Fun Project" />
+  <img src="https://img.shields.io/badge/hihi%20😹-haha%20🤪-00A1FF?labelColor=FF00D4&style=for-the-badge" alt="hihi haha" />
+</p>
 
-This repo builds a Weather API, OpenAPI integration to test with [Scalar](https://learn.microsoft.com/aspnet/core/fundamentals/openapi/using-openapi-documents?view=aspnetcore-10.0#use-scalar-for-interactive-api-documentation), and displays the data in a web application using Blazor (.NET/C#).
+<p align="center">
+  <b>Bring juicy, bouncy, and colorful satisfaction to every click on your Windows PC! 🖱️💥🎉</b>
+</p>
 
-We've given you both a frontend and backend to play around with and where you go from here is up to you!
+---
 
-Everything you do here is contained within this one codespace. There is no repository on GitHub yet. If and when you’re ready you can click "Publish Branch" and we’ll create your repository and push up your project. If you were just exploring then and have no further need for this code then you can simply delete your codespace and it's gone forever.
+## 🌟 What is Bouncy-Cursor?
 
-### Run Options
+Ever felt like your standard Windows cursor is just a bit... dull and lifeless? 🥱 
 
-[![Open in GitHub Codespaces](https://img.shields.io/static/v1?style=for-the-badge&label=GitHub+Codespaces&message=Open&color=lightgrey&logo=github)](https://codespaces.new/github/dotnet-codespaces)
-[![Open in Dev Container](https://img.shields.io/static/v1?style=for-the-badge&label=Dev+Container&message=Open&color=blue&logo=visualstudiocode)](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/github/dotnet-codespaces)
+**Bouncy-Cursor** is here to rescue your screen! This tiny but mighty application injects a massive dose of tactile, dynamic visual feedback right under your mouse pointer. Every single click triggers crisp, energetic, and satisfying animations that turn boring daily navigation into a joyful, interactive playground. It was built entirely to give you that addictive "crunchy" feedback feel every time you click around your operating system! ✨🎨
 
-You can also run this repository locally by following these instructions: 
-1. Clone the repo to your local machine `git clone https://github.com/github/dotnet-codespaces`
-1. Open repo in VS Code
+---
 
-## Getting started
+## 📺 Demo 🐭🐭🖱️
 
-1. **📤 One-click setup**: [Open a new Codespace](https://codespaces.new/github/dotnet-codespaces), giving you a fully configured cloud developer environment.
-2. **▶️ Run all, one-click again**: Use VS Code's built-in *Run* command and open the forwarded ports *8080* and *8081* in your browser. 
-
-![Debug menu in VS Code showing Run All](images/RunAll.png)
-
-3. The Blazor web app and Scalar can be open by heading to **/scalar** in your browser. On Scalar, head to the backend API and click "Test Request" to call and test the API. 
-
-![A website showing weather](images/BlazorApp.png)
-
-!["UI showing testing an API"](images/scalar.png)
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/f1b3b74b-8d22-43ba-8cbf-305d2aa24dd9" width="100%" controls autoplay loop muted>
+    Your browser does not support the video tag.
+  </video>
+</p>
 
 
-4. **🔄 Iterate quickly:** Codespaces updates the server on each save, and VS Code's debugger lets you dig into the code execution.
+---
 
-5. To stop running, return to VS Code, and click Stop twice in the debug toolbar. 
+## 🚀 Features That Pop!
 
-![VS Code stop debuggin on both backend and frontend](images/StopRun.png)
+* **💥 Juicy Click Feedback:** Instant physical bounce effects whenever you press left or right click.
+* **⚡ Performance:** Super low memory footprint (~3MB RAM). Active CPU usage around 2-8% during click animations (Tested on AMD Ryzen 5).
+* **🎯 Focus & Visibility:** Great for presentations, live streaming, or just scratching that satisfying itch.
 
+---
 
-## Contributing
+## 🛠️ Installation & Getting Started
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
+Ready to make your computer bounce? It's super easy:
 
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
+1. Head over to the **[Releases](../../releases)** section on the right side of this repository.
+2. Download the latest .zip, extract it and run the .exe.
+3. Boom! Start clicking away! 🥳
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+---
 
-## Trademarks
+## 🤝 Contributing & A Quick Note
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+> ⚠️ **Disclaimer:** This project was whipped up in about 10 minutes strictly *for fun*! ⏱️🤪 
+
+Because it was a spontaneous speedrun, the project is definitely not 100% complete or perfectly polished. I built it just to see if I could make my cursor bounce, and it worked! 
+
+If you are a developer with cool ideas for new animations, performance tweaks, or just want to add more colorful madness, the community is more than welcome to step in. Feel free to open issues, submit pull requests, and let's make this 10-minute experiment even better together! 💪🌟
