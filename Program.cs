@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Application = System.Windows.Application;
 
@@ -7,12 +8,29 @@ namespace BounceCursor
 {
     public class Program
     {
+        // Import Windows API for DPI Scaling
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetProcessDpiAwarenessContext(IntPtr dpiFlag);
+
+        // Constant for PerMonitorV2 mode
+        private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new IntPtr(-4);
+
         private static readonly string LogPath =
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
 
         [STAThread]
         public static void Main()
         {
+            // Force high-DPI rendering before any UI or graphics are initialized
+            try
+            {
+                SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            }
+            catch
+            {
+                // Fallback silently if OS does not support this API
+            }
+
             AppDomain.CurrentDomain.ProcessExit += (_, _) => CursorAnimator.RestoreAll();
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             {
