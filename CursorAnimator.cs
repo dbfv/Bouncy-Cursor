@@ -22,18 +22,15 @@ namespace BounceCursor
 
         private const uint SPI_SETCURSORS = 0x0057;
 
-        // Cac handle "goc" (pristine) dung lam nguon de scale.
-        // KHONG con la static readonly nap 1 lan luc khoi dong nua,
-        // vi luc app vua mo (dac biet la chay cung luc Windows dang nhap
-        // va xuat thang ra man hinh ngoai) theme con tro cua Windows co the
-        // CHUA load xong -> LoadCursor tra ve con tro mac dinh/degenerate,
-        // va neu cache y nguyen cai do mai mai thi moi lan scale sau deu bi vo.
+        // The "pristine" base handles used as a source for scaling. We dynamically reload
+        // these if they aren't loaded correctly on startup (e.g. cold boot to external monitor).
         private static IntPtr _origArrowHandle = IntPtr.Zero;
         private static IntPtr _origHandHandle = IntPtr.Zero;
         private static IntPtr _origIBeamHandle = IntPtr.Zero;
 
         private static volatile bool _baseCursorsReady;
         private static readonly object _initLock = new();
+        private static bool _reWarmSubscribed;
 
         private static readonly string LogPath =
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cursor-debug.log");
@@ -43,11 +40,9 @@ namespace BounceCursor
             var ci = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
             if (!GetCursorInfo(out ci) || ci.hCursor == IntPtr.Zero) return CursorKind.None;
 
-            // Nap lai handle tham chieu MOI LAN goi (rat re voi con tro he thong chuan)
-            // thay vi so sanh voi handle cache tinh 1 lan luc khoi dong. Windows co the
-            // tra ve cac handle KHAC NHAU cho "cung mot" con tro tuy theo DPI cua
-            // man hinh hien tai khi app Per-Monitor-DPI-aware, nen so voi cache cu de
-            // bi None (khong nhan dien duoc) khi doi man hinh / DPI.
+            // Load cursor handles on every call (very cheap for standard system cursors).
+            // Comparing with fixed startup handles is unreliable because Per-Monitor DPI
+            // aware apps might get different underlying system handles dynamically.
             IntPtr arrow = LoadCursor(IntPtr.Zero, (IntPtr)IDC_ARROW);
             IntPtr hand = LoadCursor(IntPtr.Zero, (IntPtr)IDC_HAND);
             IntPtr ibeam = LoadCursor(IntPtr.Zero, (IntPtr)IDC_IBEAM);
@@ -64,9 +59,7 @@ namespace BounceCursor
 
             if (!_baseCursorsReady)
             {
-                // Chua san sang (dang warm-up o nen, hoac warm-up chua kip chay) ->
-                // bo qua khung hinh nay thay vi build tu 1 cursor goc chua hop le.
-                // Tha mat vai khung hinh animation con hon set 1 con tro vo ra man hinh.
+                // Not ready (warming up or failed) -> skip this frame rather than setting an invalid cursor.
                 return;
             }
 
@@ -86,8 +79,7 @@ namespace BounceCursor
             }
             else
             {
-                Log($"ApplyScale: BuildScaledCursor that bai (kind={kind}, scale={scale:0.00}). " +
-                    "Danh dau lai la 'chua san sang' va thu nap lai cursor goc o nen.");
+                Log($"ApplyScale: BuildScaledCursor failed (kind={kind}, scale={scale:0.00}). Marking as not ready and re-arming.");
                 _baseCursorsReady = false;
                 _ = Task.Run(EnsureBaseCursorsLoaded);
             }
@@ -97,12 +89,33 @@ namespace BounceCursor
             SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
 
         /// <summary>
-        /// Goi 1 lan luc khoi dong (tren background thread) de "lam nong" cache
-        /// cursor goc truoc khi nguoi dung kip click. Tu thu lai vai lan neu
-        /// theme con tro cua Windows chua san sang (VD: vua khoi dong may,
-        /// dang xuat thang ra man hinh ngoai, driver/monitor chua init xong).
+        /// Called once at startup (on background thread) to "warm up" the base cursor cache 
+        /// before the user can click. Retries automatically if the Windows cursor theme 
+        /// isn't fully ready yet (e.g. during immediate external monitor boot sequence).
         /// </summary>
-        public static void WarmUp() => EnsureBaseCursorsLoaded();
+        public static void WarmUp()
+        {
+            EnsureBaseCursorsLoaded();
+
+            // Re-warm when display settings / DPI change to ensure we get the best pristine cursor.
+            if (!_reWarmSubscribed)
+            {
+                _reWarmSubscribed = true;
+                try
+                {
+                    Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) =>
+                    {
+                        Log("DisplaySettingsChanged: resetting _baseCursorsReady and reloading base cursors.");
+                        _baseCursorsReady = false;
+                        _ = Task.Run(EnsureBaseCursorsLoaded);
+                    };
+                }
+                catch (Exception ex)
+                {
+                    Log($"WarmUp: Failed to subscribe to DisplaySettingsChanged ({ex.Message}).");
+                }
+            }
+        }
 
         private static void EnsureBaseCursorsLoaded()
         {
@@ -112,8 +125,8 @@ namespace BounceCursor
             {
                 if (_baseCursorsReady) return;
 
-                const int maxAttempts = 6;
-                const int delayMs = 250;
+                const int maxAttempts = 8;
+                const int delayMs = 300;
 
                 for (int attempt = 1; attempt <= maxAttempts; attempt++)
                 {
@@ -125,35 +138,69 @@ namespace BounceCursor
                     bool handOk = IsCursorSane(hand, out string handInfo);
                     bool ibeamOk = IsCursorSane(ibeam, out string ibeamInfo);
 
-                    Log($"EnsureBaseCursorsLoaded lan {attempt}/{maxAttempts}: " +
-                        $"DPI he thong={GetDpiForSystem()} | arrow: {arrowInfo} | hand: {handInfo} | ibeam: {ibeamInfo}");
+                    Log($"EnsureBaseCursorsLoaded attempt {attempt}/{maxAttempts}: System DPI={GetDpiForSystem()} | arrow: {arrowInfo} | hand: {handInfo} | ibeam: {ibeamInfo}");
 
                     if (arrowOk && handOk && ibeamOk)
                     {
-                        _origArrowHandle = arrow;
-                        _origHandHandle = hand;
-                        _origIBeamHandle = ibeam;
-                        _baseCursorsReady = true;
-                        Log("EnsureBaseCursorsLoaded: OK, cursor goc da san sang.");
-                        return;
-                    }
+                        IntPtr arrowVal = ValidateAndKeepCursor(arrow, out string arrowValInfo);
+                        IntPtr handVal = ValidateAndKeepCursor(hand, out string handValInfo);
+                        IntPtr ibeamVal = ValidateAndKeepCursor(ibeam, out string ibeamValInfo);
 
-                    if (arrow != IntPtr.Zero) DestroyIcon(arrow);
-                    if (hand != IntPtr.Zero) DestroyIcon(hand);
-                    if (ibeam != IntPtr.Zero) DestroyIcon(ibeam);
+                        DestroyIcon(arrow);
+                        DestroyIcon(hand);
+                        DestroyIcon(ibeam);
+
+                        Log($"EnsureBaseCursorsLoaded attempt {attempt}: validation -> arrow: {arrowValInfo} | hand: {handValInfo} | ibeam: {ibeamValInfo}");
+
+                        if (arrowVal != IntPtr.Zero && handVal != IntPtr.Zero && ibeamVal != IntPtr.Zero)
+                        {
+                            if (_origArrowHandle != IntPtr.Zero) DestroyIcon(_origArrowHandle);
+                            if (_origHandHandle != IntPtr.Zero) DestroyIcon(_origHandHandle);
+                            if (_origIBeamHandle != IntPtr.Zero) DestroyIcon(_origIBeamHandle);
+
+                            _origArrowHandle = arrowVal;
+                            _origHandHandle = handVal;
+                            _origIBeamHandle = ibeamVal;
+                            _baseCursorsReady = true;
+                            Log("EnsureBaseCursorsLoaded: OK, base cursors are ready.");
+                            return;
+                        }
+
+                        if (arrowVal != IntPtr.Zero) DestroyIcon(arrowVal);
+                        if (handVal != IntPtr.Zero) DestroyIcon(handVal);
+                        if (ibeamVal != IntPtr.Zero) DestroyIcon(ibeamVal);
+
+                        Log($"EnsureBaseCursorsLoaded attempt {attempt}: Structurally sane but validation/content check failed -> retrying.");
+                    }
+                    else
+                    {
+                        if (arrow != IntPtr.Zero) DestroyIcon(arrow);
+                        if (hand != IntPtr.Zero) DestroyIcon(hand);
+                        if (ibeam != IntPtr.Zero) DestroyIcon(ibeam);
+                    }
 
                     if (attempt < maxAttempts) Thread.Sleep(delayMs);
                 }
 
-                // Het so lan thu cho phep: van nap 1 bo handle cuoi cung de app
-                // khong bi "cam" hoan toan, nhung da log lai ro rang de biet la
-                // truong hop bat thuong (neu van gap thi day chinh la bang chung
-                // can gui lai de dieu tra tiep).
-                _origArrowHandle = CopyIcon(LoadCursor(IntPtr.Zero, (IntPtr)IDC_ARROW));
-                _origHandHandle = CopyIcon(LoadCursor(IntPtr.Zero, (IntPtr)IDC_HAND));
-                _origIBeamHandle = CopyIcon(LoadCursor(IntPtr.Zero, (IntPtr)IDC_IBEAM));
+                IntPtr fallbackArrow = CopyIcon(LoadCursor(IntPtr.Zero, (IntPtr)IDC_ARROW));
+                IntPtr fallbackHand = CopyIcon(LoadCursor(IntPtr.Zero, (IntPtr)IDC_HAND));
+                IntPtr fallbackIBeam = CopyIcon(LoadCursor(IntPtr.Zero, (IntPtr)IDC_IBEAM));
+
+                IntPtr fallbackArrowVal = ValidateAndKeepCursor(fallbackArrow, out _);
+                IntPtr fallbackHandVal = ValidateAndKeepCursor(fallbackHand, out _);
+                IntPtr fallbackIBeamVal = ValidateAndKeepCursor(fallbackIBeam, out _);
+
+                if (fallbackArrowVal != IntPtr.Zero) { _origArrowHandle = fallbackArrowVal; DestroyIcon(fallbackArrow); }
+                else { _origArrowHandle = fallbackArrow; }
+
+                if (fallbackHandVal != IntPtr.Zero) { _origHandHandle = fallbackHandVal; DestroyIcon(fallbackHand); }
+                else { _origHandHandle = fallbackHand; }
+
+                if (fallbackIBeamVal != IntPtr.Zero) { _origIBeamHandle = fallbackIBeamVal; DestroyIcon(fallbackIBeam); }
+                else { _origIBeamHandle = fallbackIBeam; }
+
                 _baseCursorsReady = true;
-                Log("EnsureBaseCursorsLoaded: het luot thu, dung tam bo handle cuoi cung (co the chua ly tuong).");
+                Log("EnsureBaseCursorsLoaded: Max attempts reached, using fallback handles.");
             }
         }
 
@@ -164,7 +211,7 @@ namespace BounceCursor
 
             if (!GetIconInfo(hCursor, out ICONINFO iconInfo))
             {
-                info = "GetIconInfo that bai";
+                info = "GetIconInfo failed";
                 return false;
             }
 
@@ -174,14 +221,14 @@ namespace BounceCursor
                 IntPtr srcBmp = isColor ? iconInfo.hbmColor : iconInfo.hbmMask;
                 if (srcBmp == IntPtr.Zero)
                 {
-                    info = "khong co bitmap nao (ca color lan mask deu null)";
+                    info = "no bitmaps (both color and mask are null)";
                     return false;
                 }
 
                 var bmpInfo = new BITMAP();
                 if (GetObject(srcBmp, Marshal.SizeOf<BITMAP>(), ref bmpInfo) == 0)
                 {
-                    info = "GetObject that bai";
+                    info = "GetObject failed";
                     return false;
                 }
 
@@ -189,22 +236,79 @@ namespace BounceCursor
                 int height = bmpInfo.bmHeight;
                 if (!isColor)
                 {
-                    // Cursor don sac: hbmMask gop ca mat na AND (nua tren) va XOR (nua duoi)
                     if (height % 2 != 0)
                     {
-                        info = $"mono nhung bmHeight le ({height}) -> bat thuong";
+                        info = $"monochrome but bmHeight is odd ({height}) -> abnormal";
                         return false;
                     }
                     height /= 2;
                 }
 
-                info = $"{(isColor ? "mau" : "don sac")} {width}x{height}";
+                info = $"{(isColor ? "color" : "mono")} {width}x{height}";
                 return width is > 0 and <= 256 && height is > 0 and <= 256;
             }
             finally
             {
                 if (iconInfo.hbmColor != IntPtr.Zero) DeleteObject(iconInfo.hbmColor);
                 if (iconInfo.hbmMask != IntPtr.Zero) DeleteObject(iconInfo.hbmMask);
+            }
+        }
+
+        private static IntPtr ValidateAndKeepCursor(IntPtr rawCursor, out string info)
+        {
+            info = "handle=NULL";
+            if (rawCursor == IntPtr.Zero) return IntPtr.Zero;
+
+            if (!GetIconInfo(rawCursor, out ICONINFO iconInfo))
+            {
+                info = "GetIconInfo failed";
+                return IntPtr.Zero;
+            }
+
+            try
+            {
+                using var srcBmp = ExtractColorBitmap(iconInfo);
+                if (srcBmp == null)
+                {
+                    info = "failed to extract bitmap";
+                    return IntPtr.Zero;
+                }
+
+                if (!HasVisibleContent(srcBmp))
+                {
+                    info = $"bitmap {srcBmp.Width}x{srcBmp.Height} has NO CONTENT (transparent) -> possible driver glitch";
+                    return IntPtr.Zero;
+                }
+
+                info = $"Valid {srcBmp.Width}x{srcBmp.Height}";
+                return CopyIcon(rawCursor);
+            }
+            finally
+            {
+                if (iconInfo.hbmColor != IntPtr.Zero) DeleteObject(iconInfo.hbmColor);
+                if (iconInfo.hbmMask != IntPtr.Zero) DeleteObject(iconInfo.hbmMask);
+            }
+        }
+
+        private static bool HasVisibleContent(Bitmap bmp)
+        {
+            var data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height),
+                ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+            try
+            {
+                int byteCount = data.Stride * bmp.Height;
+                byte[] buffer = new byte[byteCount];
+                Marshal.Copy(data.Scan0, buffer, 0, byteCount);
+
+                for (int i = 3; i < byteCount; i += 4) // Alpha channel
+                {
+                    if (buffer[i] > 20) return true;
+                }
+                return false;
+            }
+            finally
+            {
+                bmp.UnlockBits(data);
             }
         }
 
@@ -218,22 +322,22 @@ namespace BounceCursor
                 using var colorBmp = ExtractColorBitmap(info);
                 if (colorBmp == null) return IntPtr.Zero;
 
-                // Calculate destination size and offsets using Math.Round to prevent sub-pixel rendering blur
                 int destW = (int)Math.Round(colorBmp.Width * scale);
                 int destH = (int)Math.Round(colorBmp.Height * scale);
                 int offsetX = (int)Math.Round(info.xHotspot * (1.0 - scale));
                 int offsetY = (int)Math.Round(info.yHotspot * (1.0 - scale));
 
-                using var canvas = new Bitmap(colorBmp.Width, colorBmp.Height, PixelFormat.Format32bppArgb);
+                // Crucial: Format32bppPArgb tells GDI+ that colors are already pre-multiplied.
+                // This eliminates the dark halo / jagged edges ("vỡ nét") during downscaling.
+                using var canvas = new Bitmap(colorBmp.Width, colorBmp.Height, PixelFormat.Format32bppPArgb);
                 using (var g = Graphics.FromImage(canvas))
                 {
                     g.Clear(Color.Transparent);
 
-                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                     g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
                     g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
 
-                    // Use ImageAttributes to prevent edge bleeding (ringing artifacts)
                     using var attributes = new System.Drawing.Imaging.ImageAttributes();
                     attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
 
@@ -278,13 +382,9 @@ namespace BounceCursor
 
             if (!isColor)
             {
-                // Cursor don sac (VD: khi Windows chua load xong theme cursor mau luc
-                // boot thang ra man hinh ngoai): hbmMask la 1 bitmap 1-bit CAO GAP DOI,
-                // nua tren la AND mask, nua duoi la XOR mask. Neu doc thang cai nay nhu
-                // 1 bitmap mau 32-bit binh thuong (nhu code cu tung lam) se ra hinh vo/nhieu.
                 if (height % 2 != 0)
                 {
-                    Log($"ExtractColorBitmap: cursor don sac nhung bmHeight le ({height}) -> bo qua.");
+                    Log($"ExtractColorBitmap: mono cursor but odd bmHeight ({height}) -> skipping.");
                     return null;
                 }
                 height /= 2;
@@ -292,7 +392,7 @@ namespace BounceCursor
 
             if (width <= 0 || height <= 0 || width > 256 || height > 256)
             {
-                Log($"ExtractColorBitmap: kich thuoc bat thuong width={width} height={height} isColor={isColor} -> bo qua.");
+                Log($"ExtractColorBitmap: abnormal dimensions width={width} height={height} isColor={isColor} -> skipping.");
                 return null;
             }
 
@@ -324,28 +424,24 @@ namespace BounceCursor
                 ReleaseDC(IntPtr.Zero, hdc);
             }
 
-            var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-            var data = bmp.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            var bmp = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+            var data = bmp.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
             Marshal.Copy(buffer, 0, data.Scan0, buffer.Length);
             bmp.UnlockBits(data);
             return bmp;
         }
 
-        /// <summary>
-        /// Giai ma cursor don sac (AND/XOR mask) thanh ARGB that su thay vi
-        /// doc nham mask 1-bit (cao gap doi) nhu the no la bitmap mau 32-bit.
-        /// </summary>
         private static Bitmap? ExtractMonochromeArgb(IntPtr hbmMask, int width, int height)
         {
             var bmi = new BITMAPINFO();
             bmi.bmiHeader.biSize = Marshal.SizeOf<BITMAPINFOHEADER>();
             bmi.bmiHeader.biWidth = width;
-            bmi.bmiHeader.biHeight = -(height * 2); // top-down, doc ca AND + XOR
+            bmi.bmiHeader.biHeight = -(height * 2); 
             bmi.bmiHeader.biPlanes = 1;
             bmi.bmiHeader.biBitCount = 1;
             bmi.bmiHeader.biCompression = 0;
 
-            int maskStride = ((width + 31) / 32) * 4; // DIB 1bpp luon can theo 4 byte (DWORD)
+            int maskStride = ((width + 31) / 32) * 4;
             byte[] maskBuffer = new byte[maskStride * height * 2];
 
             IntPtr hdc = GetDC(IntPtr.Zero);
@@ -375,10 +471,10 @@ namespace BounceCursor
                     bool xorBit = GetMaskBit(maskBuffer, xorRowOffset, x);
 
                     byte a, c;
-                    if (!andBit && !xorBit) { a = 255; c = 0; }       // den, duc
-                    else if (!andBit && xorBit) { a = 255; c = 255; } // trang, duc
-                    else if (andBit && !xorBit) { a = 0; c = 0; }     // trong suot
-                    else { a = 255; c = 128; }                       // hiem gap (invert) -> xam
+                    if (!andBit && !xorBit) { a = 255; c = 0; }       // Black
+                    else if (!andBit && xorBit) { a = 255; c = 255; } // White
+                    else if (andBit && !xorBit) { a = 0; c = 0; }     // Transparent
+                    else { a = 255; c = 128; }                        // Inverted -> Gray
 
                     int i = y * argbStride + x * 4;
                     argb[i + 0] = c; // B
@@ -388,8 +484,8 @@ namespace BounceCursor
                 }
             }
 
-            var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-            var data = bmp.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            var bmp = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+            var data = bmp.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
             Marshal.Copy(argb, 0, data.Scan0, argb.Length);
             bmp.UnlockBits(data);
             return bmp;
@@ -416,19 +512,14 @@ namespace BounceCursor
             IntPtr hBitmap = CreateDIBSection(IntPtr.Zero, ref bmi, 0, out IntPtr ppvBits, IntPtr.Zero, 0);
             if (hBitmap == IntPtr.Zero || ppvBits == IntPtr.Zero) return IntPtr.Zero;
 
-            var data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            var data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
             try
             {
                 int byteCount = data.Stride * h;
+                // Since the canvas is natively PArgb, the memory layout perfectly matches 
+                // the pre-multiplied DIB requirements. We just do a direct byte copy!
                 byte[] buffer = new byte[byteCount];
                 Marshal.Copy(data.Scan0, buffer, 0, byteCount);
-                for (int i = 0; i < byteCount; i += 4)
-                {
-                    byte b = buffer[i], g = buffer[i + 1], r = buffer[i + 2], a = buffer[i + 3];
-                    buffer[i] = (byte)(b * a / 255);
-                    buffer[i + 1] = (byte)(g * a / 255);
-                    buffer[i + 2] = (byte)(r * a / 255);
-                }
                 Marshal.Copy(buffer, 0, ppvBits, byteCount);
             }
             finally { bmp.UnlockBits(data); }
@@ -459,7 +550,7 @@ namespace BounceCursor
             }
             catch
             {
-                // Ghi log loi thi bo qua, khong duoc lam crash chuong trinh chinh.
+                // Silent catch for logger
             }
         }
 
