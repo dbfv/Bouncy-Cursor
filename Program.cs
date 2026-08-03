@@ -57,6 +57,13 @@ namespace BounceCursor
                 e.Handled = true;
             };
 
+            // Nap truoc (warm-up) cursor goc o mot background thread, KHONG chan UI thread.
+            // Quan trong khi may khoi dong thang ra man hinh ngoai: theme con tro cua
+            // Windows co the chua san sang ngay luc app vua chay, nen viec nap va kiem
+            // chung cursor goc duoc lam o day (co tu thu lai) truoc khi nguoi dung kip
+            // click chuot lan dau.
+            _ = System.Threading.Tasks.Task.Run(CursorAnimator.WarmUp);
+
             var bounce = new CursorBounceEffect();
             var hook = new MouseHook();
             hook.LeftButtonDown += (x, y) => app.Dispatcher.Invoke(() => bounce.OnPress());
